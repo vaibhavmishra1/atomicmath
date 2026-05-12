@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>atomicmath — pipeline trace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e10;
+      --panel: #14181c;
+      --border: #243038;
+      --text: #d8e0e8;
+      --muted: #7a8a98;
+      --accent: #3dd6c3;
+      --warn: #e8b84a;
+      --bad: #f07178;
+      --good: #7fd99a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Instrument Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #12161a 0%, var(--bg) 100%);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    header p { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.6rem;
+      padding: 1rem 1.25rem;
+      max-width: 1400px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+    }
+    .card label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .card .val {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    @media (min-width: 900px) {
+      .layout { grid-template-columns: 1fr 300px; }
+    }
+    .feed-wrap {
+      border-top: 1px solid var(--border);
+      padding: 0 0 2rem;
+    }
+    .feed-wrap h2 {
+      margin: 0;
+      padding: 1rem 1.25rem 0.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    #feed {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      max-height: min(78vh, 900px);
+      overflow-y: auto;
+      margin: 0 1rem;
+      padding: 0.5rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .ev {
+      padding: 0.5rem 0.6rem;
+      border-left: 3px solid var(--border);
+      margin-bottom: 0.5rem;
+      background: rgba(0,0,0,0.25);
+      border-radius: 0 6px 6px 0;
+    }
+    .ev:hover { border-left-color: var(--accent); }
+    .ev-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.75rem; }
+    .ev .meta { color: var(--muted); font-size: 0.65rem; }
+    .ev .step { color: var(--text); font-weight: 600; font-size: 0.78rem; }
+    .ev .msg { color: var(--warn); margin-top: 0.2rem; font-size: 0.72rem; }
+    .ev .toggle {
+      font-family: "Instrument Sans", sans-serif;
+      font-size: 0.65rem;
+      padding: 0.15rem 0.45rem;
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .ev .toggle:hover { border-color: var(--accent); }
+    .payload-detail {
+      margin-top: 0.45rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      max-height: 5.5rem;
+      overflow: hidden;
+      transition: max-height 0.2s ease;
+    }
+    .ev.expanded .payload-detail {
+      max-height: min(72vh, 1400px);
+      overflow: auto;
+    }
+    .kv .k {
+      display: block;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      margin-bottom: 0.12rem;
+      font-family: "Instrument Sans", sans-serif;
+    }
+    .kv pre.v {
+      margin: 0;
+      padding: 0.35rem 0.45rem;
+      background: rgba(0,0,0,0.35);
+      border-radius: 4px;
+      color: #b8c8d4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.68rem;
+      line-height: 1.4;
+      max-height: none;
+    }
+    aside {
+      border-top: 1px solid var(--border);
+      padding: 1rem 1.25rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    @media (min-width: 900px) {
+      aside { border-top: none; border-left: 1px solid var(--border); }
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--bad);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .status-dot.ok { background: var(--good); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>atomicmath <span style="color:var(--muted);font-weight:400">live trace</span></h1>
+    <p><span id="dot" class="status-dot"></span><span id="pollStatus">connecting…</span> · poll <span id="hz">—</span> · last id <span id="lastId">0</span></p>
+  </header>
+  <div class="grid" id="stats"></div>
+  <div class="layout">
+    <div class="feed-wrap">
+      <h2>Event stream</h2>
+      <div id="feed"></div>
+    </div>
+    <aside>
+      <strong style="color:var(--text)">What you see</strong>
+      <p>Each card is one step. <strong>Expand</strong> shows full payloads: questions, answers, solver outputs, traces, molecules, and verification math.</p>
+      <p>Per-seed indexing emits <code>ingest.seed</code>, then <code>index.*</code> (embed, dataset solution trace, molecule extract, hashes).</p>
+      <p>Use the same <code style="color:var(--accent)">storage.db_path</code> as the running pipeline.</p>
+    </aside>
+  </div>
+  <script>
+    let afterId = 0;
+    const feed = document.getElementById("feed");
+    const stats = document.getElementById("stats");
+    const pollStatus = document.getElementById("pollStatus");
+    const dot = document.getElementById("dot");
+    const hz = document.getElementById("hz");
+    const lastIdEl = document.getElementById("lastId");
+
+    function esc(s) {
+      if (s == null) return "";
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    function renderStats(c) {
+      const items = [
+        ["Seeds (total)", c.seeds_total],
+        ["Indexed", c.seeds_indexed],
+        ["Eligible", c.seeds_eligible],
+        ["Outputs", c.outputs],
+        ["Trace events", c.events_total],
+      ];
+      stats.innerHTML = items.map(([l,v]) =>
+        `<div class="card"><label>${esc(l)}</label><div class="val">${esc(v)}</div></div>`
+      ).join("");
+    }
+
+    function renderPayloadBlock(key, val) {
+      const k = esc(key);
+      if (val === null || val === undefined) {
+        return `<div class="kv"><span class="k">${k}</span><pre class="v">null</pre></div>`;
+      }
+      if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+        return `<div class="kv"><span class="k">${k}</span><pre class="v">${esc(String(val))}</pre></div>`;
+      }
+      return `<div class="kv"><span class="k">${k}</span><pre class="v">${esc(JSON.stringify(val, null, 2))}</pre></div>`;
+    }
+
+    function renderPayload(payload) {
+      if (!payload || typeof payload !== "object") return "";
+      const keys = Object.keys(payload).sort();
+      return `<div class="payload-detail">${keys.map((key) => renderPayloadBlock(key, payload[key])).join("")}</div>`;
+    }
+
+    function appendEvents(rows) {
+      for (const r of rows) {
+        afterId = Math.max(afterId, r.id);
+        const div = document.createElement("div");
+        div.className = "ev";
+        const hasPayload = r.payload && typeof r.payload === "object" && Object.keys(r.payload).length > 0;
+        const btn = hasPayload
+          ? `<button type="button" class="toggle" aria-expanded="false">expand</button>`
+          : "";
+        div.innerHTML =
+          `<div class="ev-head">` +
+          `<span class="meta">#${r.id} · ${esc(r.phase)} · ${r.ts != null ? new Date(r.ts*1000).toISOString().slice(11,19) : ""}</span>` +
+          `${btn}` +
+          `</div>` +
+          `<div class="step">${esc(r.step)}${r.seed_id ? " · seed " + esc(r.seed_id) : ""}${r.attempt != null ? " · synth attempt " + esc(r.attempt) : ""}</div>` +
+          (r.message ? `<div class="msg">${esc(r.message)}</div>` : "") +
+          (hasPayload ? renderPayload(r.payload) : "");
+        const toggle = div.querySelector(".toggle");
+        if (toggle) {
+          toggle.addEventListener("click", () => {
+            const on = div.classList.toggle("expanded");
+            toggle.textContent = on ? "collapse" : "expand";
+            toggle.setAttribute("aria-expanded", on ? "true" : "false");
+          });
+        }
+        feed.appendChild(div);
+      }
+      feed.scrollTop = feed.scrollHeight;
+      lastIdEl.textContent = String(afterId);
+    }
+
+    async function tick() {
+      const t0 = performance.now();
+      try {
+        const [sRes, eRes] = await Promise.all([
+          fetch("/api/summary"),
+          fetch("/api/events?after=" + afterId + "&limit=800"),
+        ]);
+        if (!sRes.ok || !eRes.ok) throw new Error("http");
+        const summary = await sRes.json();
+        const ev = await eRes.json();
+        renderStats(summary);
+        if (ev.events && ev.events.length) appendEvents(ev.events);
+        pollStatus.textContent = "connected";
+        dot.classList.add("ok");
+        hz.textContent = Math.round(1000 / (performance.now() - t0)) + "/s";
+      } catch (e) {
+        pollStatus.textContent = "disconnected (is the server running?)";
+        dot.classList.remove("ok");
+        hz.textContent = "—";
+      }
+    }
+
+    setInterval(tick, 500);
+    tick();
+  </script>
+</body>
+</html>
