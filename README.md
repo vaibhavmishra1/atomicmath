@@ -1,17 +1,16 @@
 # atomicmath
 
-`atomicmath` is an experimental pipeline for creating new contest-style math
+`atomicmath` is a math problem synthesis system for generating contest-style
 problems from solved seed problems.
 
-The current main idea is not to decorate a problem with extra conditions or
-longer calculations. The pipeline tries to identify the mathematical places
-where a student is likely to get stuck, then asks a model to transform the
-problem so that one of those bottlenecks is preserved but appears in a sharper
-or less obvious form.
+The system is built around structural transformation rather than surface-level
+rewriting. It identifies the mathematical bottlenecks that make a seed problem
+work, then generates new problems that preserve those bottlenecks while changing
+how the solver discovers them.
 
-In this repo those bottlenecks are called **hinges**.
+The system represents these bottlenecks as **hinges**.
 
-## Core Idea
+## Synthesis Objective
 
 A seed problem contains more than a topic label. It contains a small piece of
 math logic that makes the problem work:
@@ -24,11 +23,11 @@ math logic that makes the problem work:
 - a cyclic-order or parity mistake;
 - a condition that must become tight.
 
-The mutation pipeline tries to extract those hinges from the seed question and
-solution, then generate a new problem that keeps the important hinge while
-changing the surface structure.
+The mutation pipeline extracts these hinges from the seed question and solution,
+then generates a new problem that preserves the important mathematical logic
+while changing the problem structure.
 
-The target is:
+The synthesis criteria are:
 
 ```text
 same mathematical bottleneck
@@ -39,7 +38,7 @@ short solution
 no stitched-on downstream task
 ```
 
-## Current Mutation Pipeline
+## Mutation Pipeline
 
 ```text
 Hugging Face seed dataset
@@ -89,21 +88,22 @@ optional publish to Hugging Face
 
 For each seed question, the extractor writes 2-3 self-contained hinge notes.
 
-A hinge note should explain:
+Each hinge note explains:
 
 - what concept or trick is being tested;
 - why students are likely to fail there;
 - what triggers the hinge;
 - what the hinge resolves in the solution;
-- how the idea could be pushed toward the edge of solvability;
+- how the idea can be pushed toward the edge of solvability;
 - what mutations would become artificial or boring.
 
-The hinge is not the thing being directly mutated. It is the guardrail that
-keeps the new problem mathematically related to the seed.
+A hinge is not the object being directly mutated. It is the guardrail that keeps
+the new problem mathematically aligned with the seed.
 
 ## Generation
 
-Generation is a single LLM call that performs both planning and problem writing.
+Generation is a single LLM call that performs both transformation planning and
+problem writing.
 
 The model receives:
 
@@ -125,9 +125,9 @@ It must return a structured candidate containing:
 - why it is not stitched;
 - why it is not a direct sibling of the seed.
 
-The prompt intentionally does not force a fixed mutation type. The model is
-asked to reject weak ideas first, then choose a transformation that changes what
-the solver must notice.
+The prompt does not force a fixed mutation type. It requires the model to reject
+weak directions first, then choose a transformation that changes what the solver
+must notice.
 
 ## Global Mutation Memory
 
@@ -143,18 +143,19 @@ mutation_experiences
   compact lessons about what worked and what failed
 ```
 
-This is global memory, not question-wise memory. A new seed can benefit from
-lessons learned on older seeds.
+This is global memory, not question-wise memory. New seeds benefit from lessons
+learned on previous generations.
 
 Only a small top-K memory set is shown to the generator:
 
 - top success memories;
 - top failure memories;
 - topic-matched memories are prioritized;
-- old/low-weight memories are kept in storage but not necessarily shown.
+- old or low-weight memories remain in storage without being promoted into the
+  active prompt context.
 
-This prevents the prompt from growing forever while still allowing the system to
-learn from previous attempts.
+This keeps the prompt bounded while preserving reusable knowledge from prior
+generations.
 
 See [`docs/03-global-mutation-memory.md`](docs/03-global-mutation-memory.md).
 
@@ -254,9 +255,9 @@ python3 -m atomicmath.cli mutate publish \
   --dataset vibhuiitj/math500-output_atomicmath
 ```
 
-## Older Retrosynthesis Path
+## Retrosynthesis Path
 
-The repo also contains an older composer/realizer pipeline:
+The repository also includes a composer/realizer pipeline:
 
 ```text
 ingest -> normalize topics -> index seeds -> bootstrap exemplars
@@ -272,7 +273,7 @@ atomicmath run --config examples/config.example.yaml --dry-run
 
 See [`docs/00-pipeline.md`](docs/00-pipeline.md) for that path.
 
-## Cost Notes
+## Operational Notes
 
 The mutation probe uses multiple LLM calls per seed:
 
@@ -281,5 +282,5 @@ The mutation probe uses multiple LLM calls per seed:
 - correctness verification when enabled;
 - quality judging.
 
-Use small `--limit` values first. The SQLite DB and cache let you inspect and
-continue runs without throwing away previous work.
+Use small `--limit` values for initial validation. The SQLite DB and cache make
+runs inspectable and resumable.
