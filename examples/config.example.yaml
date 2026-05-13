@@ -45,7 +45,7 @@ input:
 
 
 output:
-  dataset: "vibhuiitj/math500-output"
+  dataset: "vibhuiitj/math500-output_v2"
   private: false
   push_audit_sidecar: true
 
@@ -107,6 +107,31 @@ quality:
   min_contest_score: 0.50
   max_routine_score: 0.72
   require_judge_pass: false
+
+mutation:
+  enabled: true
+  extraction_model: "openai/gpt-5-mini"
+  generation_model: "openai/gpt-5-mini"
+  judge_model: "openai/gpt-5-mini"
+  prompt_version: "single_question_plan_generate_v3"
+  max_hinges_per_seed: 3
+  min_solution_chars: 20
+  generator_temperature: 0.7
+  judge_temperature: 0.0
+  global_memory_enabled: true
+  global_success_memory_limit: 5
+  global_failure_memory_limit: 5
+  global_memory_max_active: 300
+  global_memory_max_lesson_chars: 1800
+  global_memory_prioritize_topic: true
+  strict_correctness: true
+  min_hinge_preservation: 0.70
+  min_mutation_quality: 0.60
+  min_sharpness: 0.60
+  min_non_stitched: 0.75
+  min_solution_economy: 0.55
+  min_novelty: 0.55
+  max_seed_minhash_overlap: 0.75
 
 storage:
   db_path: "./atomicmath_math500.db"

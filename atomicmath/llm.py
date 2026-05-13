@@ -44,6 +44,67 @@ def _cache_key(model: str, messages: list[dict], **kwargs: Any) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def _is_reasoning_family(model: str) -> bool:
+    lower = model.lower()
+    return "gpt-5" in lower or "/o" in lower or lower.startswith("o")
+
+
+def _completion_token_budget(model: str, requested: int) -> int:
+    """Reasoning models count internal reasoning against completion tokens.
+
+    A small answer budget like 2600 can produce an empty final message if the
+    model spends the whole budget planning. Keep non-reasoning models unchanged,
+    but give reasoning-family models enough room for both reasoning and output.
+    """
+    if not _is_reasoning_family(model):
+        return requested
+    return max(8192, requested * 4)
+
+
+def _message_value(message: Any, key: str) -> Any:
+    if isinstance(message, dict):
+        return message.get(key)
+    return getattr(message, key, None)
+
+
+def _stringify_content(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(p.strip() for p in parts if p and p.strip()).strip()
+    return str(value).strip()
+
+
+def _extract_response_text(resp: Any) -> str:
+    choice = resp.choices[0]
+    message = getattr(choice, "message", None)
+    fields: list[Any] = []
+    if message is not None:
+        fields.extend(
+            [
+                _message_value(message, "content"),
+                _message_value(message, "reasoning_content"),
+                _message_value(message, "text"),
+            ]
+        )
+    fields.append(getattr(choice, "text", None))
+    for field in fields:
+        text = _stringify_content(field)
+        if text:
+            return text
+    return ""
+
+
 class LLMClient:
     """Provider-agnostic LLM caller with on-disk caching keyed on (model, messages, kwargs)."""
 
@@ -63,9 +124,14 @@ class LLMClient:
         p = self._cache_path(key)
         if p.exists():
             try:
-                return json.loads(p.read_text())
+                cached = json.loads(p.read_text())
             except Exception:
                 return None
+            # Old runs could cache empty GPT-5 responses when completion budget
+            # was exhausted before final content. Treat those as misses.
+            if not str(cached.get("content") or "").strip():
+                return None
+            return cached
         return None
 
     def _write_cache(self, key: str, value: dict) -> None:
@@ -84,7 +150,7 @@ class LLMClient:
         resp = litellm.completion(model=model, messages=messages, **kwargs)
         # Normalize to a small dict we control
         return {
-            "content": resp.choices[0].message.content,
+            "content": _extract_response_text(resp),
             "finish_reason": getattr(resp.choices[0], "finish_reason", None),
             "usage": getattr(resp, "usage", {}).__dict__ if getattr(resp, "usage", None) else {},
             "_t": time.time(),
@@ -107,7 +173,10 @@ class LLMClient:
         messages.append({"role": "user", "content": user})
         kwargs: dict[str, Any] = {"temperature": temperature}
         if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            if _is_reasoning_family(model):
+                kwargs["max_completion_tokens"] = _completion_token_budget(model, max_tokens)
+            else:
+                kwargs["max_tokens"] = max_tokens
         if response_format is not None:
             kwargs["response_format"] = response_format
 
@@ -123,7 +192,7 @@ class LLMClient:
                 return cached
         value = self._raw_call(model, messages, **kwargs)
         self._call_count += 1
-        if use_cache:
+        if use_cache and str(value.get("content") or "").strip():
             self._write_cache(key, value)
         return value
 

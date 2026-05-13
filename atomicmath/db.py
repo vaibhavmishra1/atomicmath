@@ -108,6 +108,59 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
     payload TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pipeline_events_id ON pipeline_events(id);
+
+CREATE TABLE IF NOT EXISTS seed_hinges (
+    id TEXT PRIMARY KEY,
+    seed_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    hinge_text TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (seed_id) REFERENCES seeds(id)
+);
+CREATE INDEX IF NOT EXISTS idx_seed_hinges_seed_id ON seed_hinges(seed_id);
+
+CREATE TABLE IF NOT EXISTS mutation_episodes (
+    id TEXT PRIMARY KEY,
+    seed_id TEXT NOT NULL,
+    hinge_ids TEXT NOT NULL,
+    prompt_text TEXT NOT NULL,
+    mutation_used TEXT NOT NULL DEFAULT '',
+    new_question TEXT,
+    answer TEXT,
+    short_solution TEXT,
+    result TEXT NOT NULL,
+    failure_kind TEXT,
+    scores_json TEXT NOT NULL DEFAULT '{}',
+    plan_json TEXT NOT NULL DEFAULT '{}',
+    candidate_json TEXT NOT NULL DEFAULT '{}',
+    story TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (seed_id) REFERENCES seeds(id)
+);
+CREATE INDEX IF NOT EXISTS idx_mutation_episodes_seed_id ON mutation_episodes(seed_id);
+CREATE INDEX IF NOT EXISTS idx_mutation_episodes_result ON mutation_episodes(result);
+
+CREATE TABLE IF NOT EXISTS mutation_experiences (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'global',
+    kind TEXT NOT NULL,
+    topic_norm TEXT NOT NULL DEFAULT '',
+    failure_kind TEXT,
+    mutation_used TEXT NOT NULL DEFAULT '',
+    lesson TEXT NOT NULL,
+    source_episode_ids TEXT NOT NULL DEFAULT '[]',
+    source_count INTEGER NOT NULL DEFAULT 0,
+    weight REAL NOT NULL DEFAULT 1.0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mutation_experiences_kind ON mutation_experiences(kind, active);
+CREATE INDEX IF NOT EXISTS idx_mutation_experiences_topic ON mutation_experiences(topic_norm, kind, active);
 """
 
 
@@ -133,6 +186,12 @@ class Store:
             c.execute("ALTER TABLE outputs ADD COLUMN brief_id TEXT")
         if "scaffold_id" not in out_cols:
             c.execute("ALTER TABLE outputs ADD COLUMN scaffold_id TEXT")
+        mut_info = c.execute("PRAGMA table_info(mutation_episodes)").fetchall()
+        mut_cols = {row[1] for row in mut_info}
+        if mut_cols and "plan_json" not in mut_cols:
+            c.execute("ALTER TABLE mutation_episodes ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}'")
+        if mut_cols and "candidate_json" not in mut_cols:
+            c.execute("ALTER TABLE mutation_episodes ADD COLUMN candidate_json TEXT NOT NULL DEFAULT '{}'")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -239,6 +298,22 @@ class Store:
                     (lim,),
                 ).fetchall()
             )
+
+    def get_seed(self, seed_id: str) -> sqlite3.Row | None:
+        with self._conn() as c:
+            return c.execute("SELECT * FROM seeds WHERE id = ?", (seed_id,)).fetchone()
+
+    def list_mutation_seed_rows(self, limit: int | None = None) -> list[sqlite3.Row]:
+        q = (
+            "SELECT * FROM seeds WHERE eligible = 1 AND length(trim(solution_text)) >= 20 "
+            "ORDER BY id"
+        )
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            q += " LIMIT ?"
+            params = (max(1, int(limit)),)
+        with self._conn() as c:
+            return list(c.execute(q, params).fetchall())
 
     def topic_counts(self) -> dict[str, int]:
         with self._conn() as c:
@@ -500,3 +575,303 @@ class Store:
             "events_total": int(n_events),
             "last_event_id": int(last_ev or 0),
         }
+
+    # --- single-question mutation -------------------------------------------
+
+    def delete_seed_hinges(self, seed_id: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM seed_hinges WHERE seed_id = ?", (seed_id,))
+
+    def insert_seed_hinge(
+        self,
+        *,
+        hinge_id: str,
+        seed_id: str,
+        ordinal: int,
+        hinge_text: str,
+        label: str,
+        model: str,
+        prompt_version: str,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                """INSERT INTO seed_hinges(
+                       id, seed_id, ordinal, hinge_text, label, model, prompt_version, created_at
+                   ) VALUES(?,?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       ordinal=excluded.ordinal,
+                       hinge_text=excluded.hinge_text,
+                       label=excluded.label,
+                       model=excluded.model,
+                       prompt_version=excluded.prompt_version""",
+                (
+                    hinge_id,
+                    seed_id,
+                    int(ordinal),
+                    hinge_text,
+                    label,
+                    model,
+                    prompt_version,
+                    time.time(),
+                ),
+            )
+
+    def list_seed_hinges(self, seed_id: str) -> list[sqlite3.Row]:
+        with self._conn() as c:
+            return list(
+                c.execute(
+                    "SELECT * FROM seed_hinges WHERE seed_id = ? ORDER BY ordinal, id",
+                    (seed_id,),
+                ).fetchall()
+            )
+
+    def count_seed_hinges(self, seed_id: str) -> int:
+        with self._conn() as c:
+            return int(c.execute("SELECT COUNT(*) FROM seed_hinges WHERE seed_id = ?", (seed_id,)).fetchone()[0])
+
+    def insert_mutation_episode(
+        self,
+        *,
+        episode_id: str,
+        seed_id: str,
+        hinge_ids: list[str],
+        prompt_text: str,
+        mutation_used: str = "",
+        new_question: str | None = None,
+        answer: str | None = None,
+        short_solution: str | None = None,
+        result: str = "pending",
+        failure_kind: str | None = None,
+        scores: dict | None = None,
+        plan: dict | None = None,
+        candidate: dict | None = None,
+        story: str = "",
+    ) -> None:
+        now = time.time()
+        with self._conn() as c:
+            c.execute(
+                """INSERT INTO mutation_episodes(
+                       id, seed_id, hinge_ids, prompt_text, mutation_used, new_question, answer,
+                       short_solution, result, failure_kind, scores_json, plan_json, candidate_json,
+                       story, created_at, updated_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       mutation_used=excluded.mutation_used,
+                       new_question=excluded.new_question,
+                       answer=excluded.answer,
+                       short_solution=excluded.short_solution,
+                       result=excluded.result,
+                       failure_kind=excluded.failure_kind,
+                       scores_json=excluded.scores_json,
+                       plan_json=excluded.plan_json,
+                       candidate_json=excluded.candidate_json,
+                       story=excluded.story,
+                       updated_at=excluded.updated_at""",
+                (
+                    episode_id,
+                    seed_id,
+                    json.dumps(hinge_ids),
+                    prompt_text,
+                    mutation_used,
+                    new_question,
+                    answer,
+                    short_solution,
+                    result,
+                    failure_kind,
+                    json.dumps(scores or {}, ensure_ascii=False),
+                    json.dumps(plan or {}, ensure_ascii=False),
+                    json.dumps(candidate or {}, ensure_ascii=False),
+                    story,
+                    now,
+                    now,
+                ),
+            )
+
+    def update_mutation_episode(
+        self,
+        episode_id: str,
+        *,
+        result: str,
+        failure_kind: str | None,
+        scores: dict,
+        story: str,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                """UPDATE mutation_episodes
+                   SET result = ?, failure_kind = ?, scores_json = ?, story = ?, updated_at = ?
+                   WHERE id = ?""",
+                (
+                    result,
+                    failure_kind,
+                    json.dumps(scores, ensure_ascii=False),
+                    story,
+                    time.time(),
+                    episode_id,
+                ),
+            )
+
+    def get_mutation_episode(self, episode_id: str) -> sqlite3.Row | None:
+        with self._conn() as c:
+            return c.execute("SELECT * FROM mutation_episodes WHERE id = ?", (episode_id,)).fetchone()
+
+    def list_pending_mutation_episodes(self, limit: int | None = None) -> list[sqlite3.Row]:
+        q = "SELECT * FROM mutation_episodes WHERE result = 'pending' ORDER BY created_at"
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            q += " LIMIT ?"
+            params = (max(1, int(limit)),)
+        with self._conn() as c:
+            return list(c.execute(q, params).fetchall())
+
+    def list_mutation_stories(
+        self,
+        *,
+        seed_id: str | None = None,
+        result: str | None = None,
+        limit: int = 5,
+    ) -> list[sqlite3.Row]:
+        clauses = ["story != ''"]
+        params: list[Any] = []
+        if seed_id is not None:
+            clauses.append("seed_id = ?")
+            params.append(seed_id)
+        if result is not None:
+            clauses.append("result = ?")
+            params.append(result)
+        q = (
+            "SELECT * FROM mutation_episodes WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY updated_at DESC LIMIT ?"
+        )
+        params.append(max(1, int(limit)))
+        with self._conn() as c:
+            return list(c.execute(q, tuple(params)).fetchall())
+
+    def upsert_mutation_experience(
+        self,
+        *,
+        experience_id: str,
+        kind: str,
+        lesson: str,
+        source_episode_id: str,
+        topic_norm: str = "",
+        failure_kind: str | None = None,
+        mutation_used: str = "",
+        scope: str = "global",
+        weight_delta: float = 1.0,
+    ) -> None:
+        now = time.time()
+        with self._conn() as c:
+            existing = c.execute(
+                "SELECT * FROM mutation_experiences WHERE id = ?",
+                (experience_id,),
+            ).fetchone()
+            if existing is None:
+                c.execute(
+                    """INSERT INTO mutation_experiences(
+                           id, scope, kind, topic_norm, failure_kind, mutation_used, lesson,
+                           source_episode_ids, source_count, weight, active, created_at, updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        experience_id,
+                        scope,
+                        kind,
+                        topic_norm or "",
+                        failure_kind,
+                        mutation_used or "",
+                        lesson,
+                        json.dumps([source_episode_id], ensure_ascii=False),
+                        1,
+                        float(weight_delta),
+                        1,
+                        now,
+                        now,
+                    ),
+                )
+                return
+
+            try:
+                source_ids = json.loads(existing["source_episode_ids"] or "[]")
+            except Exception:
+                source_ids = []
+            is_new_source = bool(source_episode_id) and source_episode_id not in source_ids
+            if is_new_source:
+                source_ids.append(source_episode_id)
+            c.execute(
+                """UPDATE mutation_experiences
+                   SET topic_norm = COALESCE(NULLIF(topic_norm, ''), ?),
+                       failure_kind = COALESCE(failure_kind, ?),
+                       mutation_used = COALESCE(NULLIF(mutation_used, ''), ?),
+                       source_episode_ids = ?,
+                       source_count = ?,
+                       weight = weight + ?,
+                       active = 1,
+                       updated_at = ?
+                   WHERE id = ?""",
+                (
+                    topic_norm or "",
+                    failure_kind,
+                    mutation_used or "",
+                    json.dumps(source_ids, ensure_ascii=False),
+                    len(source_ids),
+                    float(weight_delta) if is_new_source else 0.0,
+                    now,
+                    experience_id,
+                ),
+            )
+
+    def list_mutation_experiences(
+        self,
+        *,
+        kind: str | None = None,
+        topic_norm: str | None = None,
+        limit: int = 10,
+        active_only: bool = True,
+        prioritize_topic: bool = True,
+    ) -> list[sqlite3.Row]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if active_only:
+            clauses.append("active = 1")
+        if kind and kind != "all":
+            clauses.append("kind = ?")
+            params.append(kind)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        if topic_norm and prioritize_topic:
+            order = (
+                " ORDER BY CASE WHEN topic_norm = ? THEN 0 WHEN topic_norm = '' THEN 1 ELSE 2 END,"
+                " weight DESC, source_count DESC, updated_at DESC"
+            )
+            params.append(topic_norm)
+        else:
+            order = " ORDER BY weight DESC, source_count DESC, updated_at DESC"
+        q = "SELECT * FROM mutation_experiences" + where + order + " LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._conn() as c:
+            return list(c.execute(q, tuple(params)).fetchall())
+
+    def count_mutation_experiences(self, *, active_only: bool = False) -> int:
+        q = "SELECT COUNT(*) FROM mutation_experiences"
+        params: tuple[Any, ...] = ()
+        if active_only:
+            q += " WHERE active = 1"
+        with self._conn() as c:
+            return int(c.execute(q, params).fetchone()[0])
+
+    def prune_mutation_experiences(self, *, max_active: int) -> int:
+        max_active = max(1, int(max_active))
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT id FROM mutation_experiences
+                   WHERE active = 1
+                   ORDER BY weight DESC, source_count DESC, updated_at DESC""",
+            ).fetchall()
+            if len(rows) <= max_active:
+                return 0
+            deactivate = [r["id"] for r in rows[max_active:]]
+            c.executemany(
+                "UPDATE mutation_experiences SET active = 0, updated_at = ? WHERE id = ?",
+                [(time.time(), experience_id) for experience_id in deactivate],
+            )
+            return len(deactivate)

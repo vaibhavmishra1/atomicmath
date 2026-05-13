@@ -80,6 +80,34 @@ class QualityCfg(BaseModel):
     require_judge_pass: bool = False
 
 
+class MutationCfg(BaseModel):
+    enabled: bool = True
+    extraction_model: str | None = None  # default: models.extractor
+    generation_model: str | None = None  # default: first models.generators entry; does plan + generate
+    judge_model: str | None = None  # default: models.judge
+    prompt_version: str = "single_question_plan_generate_v3"
+    max_hinges_per_seed: int = Field(default=3, ge=1, le=5)
+    min_solution_chars: int = 20
+    generator_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    success_story_limit: int = Field(default=3, ge=0, le=10)
+    failure_story_limit: int = Field(default=3, ge=0, le=10)
+    global_memory_enabled: bool = True
+    global_success_memory_limit: int = Field(default=5, ge=0, le=30)
+    global_failure_memory_limit: int = Field(default=5, ge=0, le=30)
+    global_memory_max_active: int = Field(default=300, ge=20, le=5000)
+    global_memory_max_lesson_chars: int = Field(default=1800, ge=200, le=5000)
+    global_memory_prioritize_topic: bool = True
+    strict_correctness: bool = True
+    min_hinge_preservation: float = Field(default=0.70, ge=0.0, le=1.0)
+    min_mutation_quality: float = Field(default=0.60, ge=0.0, le=1.0)
+    min_sharpness: float = Field(default=0.60, ge=0.0, le=1.0)
+    min_non_stitched: float = Field(default=0.75, ge=0.0, le=1.0)
+    min_solution_economy: float = Field(default=0.55, ge=0.0, le=1.0)
+    min_novelty: float = Field(default=0.55, ge=0.0, le=1.0)
+    max_seed_minhash_overlap: float = Field(default=0.75, ge=0.0, le=1.0)
+
+
 class GeneratorCfg(BaseModel):
     rounds: int = 3
     candidates_per_round: int = 4
@@ -151,6 +179,7 @@ class Config(BaseModel):
     realizer: RealizerCfg = Field(default_factory=RealizerCfg)
     exemplar_bootstrap: ExemplarBootstrapCfg = Field(default_factory=ExemplarBootstrapCfg)
     quality: QualityCfg = Field(default_factory=QualityCfg)
+    mutation: MutationCfg = Field(default_factory=MutationCfg)
 
     @model_validator(mode="after")
     def _verifier_gate_consistent(self) -> "Config":
