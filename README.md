@@ -159,6 +159,81 @@ generations.
 
 See [`docs/03-global-mutation-memory.md`](docs/03-global-mutation-memory.md).
 
+## MathNet 100 Benchmark
+
+The current benchmark compares two generation paths on the same 100 sampled
+MathNet United States seed problems:
+
+- **Direct baseline**: seed question + solution -> direct generation.
+- **atomicmath**: seed question + solution -> hinge extraction -> mutation prompt
+  with global memory -> generation.
+
+Both outputs are evaluated with the same seed-relative comparison judge. This is
+the apples-to-apples metric used for the headline acceptance rate.
+
+| Metric | Direct baseline | atomicmath |
+| --- | ---: | ---: |
+| Total seeds | 100 | 100 |
+| Generated | 96 | 95 |
+| Judged | 96 | 94 |
+| Accepted | 35 | 34 |
+| Accepted rate | 35.0% | 34.0% |
+| Correctness rate | 96.9% | 88.3% |
+| Generation success rate | 96.0% | 95.0% |
+| Judge success rate | 96.0% | 94.0% |
+| Mean MinHash overlap | 0.047 | 0.017 |
+| Mean embedding cosine | 0.603 | 0.612 |
+| Mean depth score | 0.482 | 0.564 |
+| Mean contest score | 0.628 | 0.678 |
+| Mean novelty score | 0.659 | 0.482 |
+| Mean seed alignment | 0.628 | 0.790 |
+| Mean non-stitched score | 0.981 | 0.990 |
+| Mean solution economy | 0.889 | 0.880 |
+| Mean routine score | 0.690 | 0.652 |
+
+Failure breakdown under the shared comparison judge:
+
+| Failure kind | Direct baseline | atomicmath |
+| --- | ---: | ---: |
+| accepted | 35 | 34 |
+| generation/error | 4 | 6 |
+| incorrect | 3 | 11 |
+| near_paraphrase | 6 | 23 |
+| routine | 17 | 8 |
+| weak_quality | 35 | 18 |
+
+The shared judge result is currently a near tie on accepted rate. atomicmath
+improves depth, contest score, seed alignment, non-stitched structure, and
+routine score, but loses ground on correctness and near-paraphrase rejections.
+This suggests the hinge path is producing more purposeful transformations, but
+the generation/judging loop still needs stricter correctness control and better
+anti-sibling pressure.
+
+atomicmath also reports its own hinge-aware internal judge:
+
+| Internal atomicmath metric | Value |
+| --- | ---: |
+| Accepted | 82 / 100 |
+| Rejected | 18 / 100 |
+| Internal accepted rate | 82.0% |
+| Mean hinge preservation | 0.945 |
+| Mean mutation quality | 0.883 |
+| Mean sharpness | 0.827 |
+| Mean atomic novelty | 0.800 |
+| Mean atomic non-stitched score | 0.996 |
+| Mean atomic solution economy | 0.898 |
+
+The gap between internal acceptance (82%) and shared-judge acceptance (34%) is
+important. The internal judge is useful for measuring whether the pipeline thinks
+it preserved and transformed the hinge, but the comparison judge is stricter for
+external quality. The next optimization target is to align the internal
+atomicmath judge more closely with the shared comparison judge.
+
+Published benchmark datasets:
+
+- [`vibhuiitj/mathnet-direct-baseline_100`](https://huggingface.co/datasets/vibhuiitj/mathnet-direct-baseline_100)
+- [`vibhuiitj/mathnet-atomicmath_100`](https://huggingface.co/datasets/vibhuiitj/mathnet-atomicmath_100)
+
 ## Storage
 
 The pipeline stores progress in SQLite. The most relevant mutation tables are:

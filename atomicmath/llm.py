@@ -61,6 +61,19 @@ def _completion_token_budget(model: str, requested: int) -> int:
     return max(8192, requested * 4)
 
 
+def _supports_custom_temperature(model: str) -> bool:
+    """Some GPT-5 reasoning models only accept their default temperature.
+
+    OpenAI returns a 400 for e.g. gpt-5.5 with temperature=0.7/0.0:
+    "Only the default (1) value is supported." Omitting the parameter lets the
+    provider use the default and keeps the request valid.
+    """
+    lower = model.lower()
+    if "gpt-5.5" in lower or "gpt-5.4" in lower:
+        return False
+    return True
+
+
 def _message_value(message: Any, key: str) -> Any:
     if isinstance(message, dict):
         return message.get(key)
@@ -171,7 +184,9 @@ class LLMClient:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
-        kwargs: dict[str, Any] = {"temperature": temperature}
+        kwargs: dict[str, Any] = {}
+        if _supports_custom_temperature(model):
+            kwargs["temperature"] = temperature
         if max_tokens is not None:
             if _is_reasoning_family(model):
                 kwargs["max_completion_tokens"] = _completion_token_budget(model, max_tokens)
