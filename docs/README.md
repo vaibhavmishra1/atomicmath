@@ -8,4 +8,6 @@
 
 **Mutation memory: [`03-global-mutation-memory.md`](03-global-mutation-memory.md)** — current global distilled memory layer used by the mutation prompt.
 
+**Benchmark: [`04-mathnet-benchmark.md`](04-mathnet-benchmark.md)** — MathNet-100 comparison between direct prompting and atomicmath mutation.
+
 `research-notes/` is older exploration only; if anything disagrees with `00-pipeline.md`, trust the pipeline doc.
