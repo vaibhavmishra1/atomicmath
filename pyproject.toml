@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "atomicmath"
 version = "0.0.1"
-description = "Retrosynthesis pipeline: seed dataset → brief → scaffold → novel math problems with verification."
+description = "Lineage pipeline for iterative synthesis of new math problems from solved seed problems."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -15,19 +15,9 @@ dependencies = [
     "huggingface_hub>=0.24",
     "litellm>=1.50",
     "pydantic>=2.7",
-    "pydantic-settings>=2.3",
     "pyyaml>=6.0",
-    "numpy>=1.26",
-    "scipy>=1.13",
-    "sympy>=1.13",
-    "datasketch>=1.6",
-    "scikit-learn>=1.4",
     "rich>=13.7",
     "tenacity>=8.5",
-    "tqdm>=4.66",
-    "math-verify[antlr4_13_2]>=0.7",
-    "starlette>=0.37",
-    "uvicorn>=0.30",
 ]
 
 [project.scripts]
@@ -35,7 +25,3 @@ atomicmath = "atomicmath.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["atomicmath"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"atomicmath/taxonomy/default.json" = "atomicmath/taxonomy/default.json"
-"atomicmath/web/dashboard.html" = "atomicmath/web/dashboard.html"

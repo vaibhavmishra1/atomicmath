@@ -1,212 +1,57 @@
 # atomicmath
 
-`atomicmath` is a math problem synthesis system for generating contest-style
-problems from solved seed problems.
+`atomicmath` is an iterative math problem synthesis pipeline.
 
-The system is built around structural transformation rather than surface-level
-rewriting. It identifies the mathematical bottlenecks that make a seed problem
-work, then generates new problems that preserve those bottlenecks while changing
-how the solver discovers them.
-
-The system represents these bottlenecks as **hinges**.
-
-## Synthesis Objective
-
-A seed problem contains more than a topic label. It contains a small piece of
-math logic that makes the problem work:
-
-- a hidden equality case;
-- a divisibility obstruction;
-- a conjugate/root/eigenvalue trap;
-- an extremal condition;
-- a representation shift;
-- a cyclic-order or parity mistake;
-- a condition that must become tight.
-
-The mutation pipeline extracts these hinges from the seed question and solution,
-then generates a new problem that preserves the important mathematical logic
-while changing the problem structure.
-
-The synthesis criteria are:
+It starts from solved seed problems and advances the dataset one inferred
+iteration at a time:
 
 ```text
-same mathematical bottleneck
-different discovery path
-similar difficulty
-more creative problem shape
-short solution
-no stitched-on downstream task
+latest dataset rows -> generate variants -> refine variants -> judge variants
+                    -> select one new row for the next iteration
 ```
 
-## Mutation Pipeline
+The goal is to study whether new mathematical problem structure can emerge over
+time from repeated generation, criticism, selection, and memory. The system is
+not built around topic labels or hand-written hinge graphs. It operates directly
+on question-answer pairs and records the full artifact trail for every generated
+iteration.
 
-```text
-Hugging Face seed dataset
-        |
-        v
-ingest solved seed problems
-        |
-        v
-extract hinge notes
-        |
-        v
-build mutation prompt
-  - seed question
-  - seed solution
-  - hinge notes
-  - transformation examples
-  - global success memory
-  - global failure memory
-        |
-        v
-plan + generate in one LLM call
-        |
-        v
-candidate problem
-        |
-        v
-judge
-  - correctness
-  - hinge preservation
-  - mutation quality
-  - sharpness
-  - novelty
-  - non-stitched structure
-  - solution economy
-        |
-        v
-accepted / rejected episode
-        |
-        v
-distill global mutation memory
-        |
-        v
-optional publish to Hugging Face
-```
+## What It Does
 
-## Hinge Extraction
+For each sampled parent problem, atomicmath:
 
-For each seed question, the extractor writes 2-3 self-contained hinge notes.
+1. Loads a Hugging Face dataset with configurable question/answer fields.
+2. Checks the configured `iteration` column.
+3. Uses rows from the current max iteration as parents.
+4. If no iteration column exists, treats the dataset as raw seeds and targets
+   iteration `1`.
+5. Generates several transformed candidate problems for that next iteration.
+6. Refines all candidates together for correctness and compactness.
+7. Judges candidates for correctness, novelty, depth, seed alignment,
+   non-stitched structure, and solution economy.
+8. Saves the accepted or rejected next-iteration row with artifacts and memory.
+9. Optionally appends the new rows back to the same Hugging Face dataset or
+   publishes them to a separate dataset.
 
-Each hinge note explains:
+Each saved row includes:
 
-- what concept or trick is being tested;
-- why students are likely to fail there;
-- what triggers the hinge;
-- what the hinge resolves in the solution;
-- how the idea can be pushed toward the edge of solvability;
-- what mutations would become artificial or boring.
+- `question`
+- `answer`
+- `iteration`
+- `role` (`generated` or `rejected`)
+- `lineage_id`
+- `parent_id`
+- `source_question`
+- `source_answer`
+- `memory`
+- `memory_json`
+- `scores_json`
+- `artifacts_json`
 
-A hinge is not the object being directly mutated. It is the guardrail that keeps
-the new problem mathematically aligned with the seed.
-
-## Generation
-
-Generation is a single LLM call that performs both transformation planning and
-problem writing.
-
-The model receives:
-
-- the original question;
-- the original answer and solution;
-- extracted hinge notes;
-- examples of strong and weak transformations;
-- global memory of previous successes and failures.
-
-It must return a structured candidate containing:
-
-- the chosen transformation;
-- what got mutated;
-- why the mutation is nontrivial;
-- the new question;
-- answer;
-- short solution;
-- why the result is sharper;
-- why it is not stitched;
-- why it is not a direct sibling of the seed.
-
-The prompt does not force a fixed mutation type. It requires the model to reject
-weak directions first, then choose a transformation that changes what the solver
-must notice.
-
-## Global Mutation Memory
-
-The system keeps two layers of memory:
-
-```text
-mutation_episodes
-  raw log of every attempt
-  seed, prompt, candidate, scores, accept/reject story
-
-mutation_experiences
-  distilled global memory
-  compact lessons about what worked and what failed
-```
-
-This is global memory, not question-wise memory. New seeds benefit from lessons
-learned on previous generations.
-
-Only a small top-K memory set is shown to the generator:
-
-- top success memories;
-- top failure memories;
-- topic-matched memories are prioritized;
-- old or low-weight memories remain in storage without being promoted into the
-  active prompt context.
-
-This keeps the prompt bounded while preserving reusable knowledge from prior
-generations.
-
-See [`docs/03-global-mutation-memory.md`](docs/03-global-mutation-memory.md).
-
-## Benchmark Snapshot
-
-On a 100-seed MathNet benchmark, atomicmath shifts generation toward deeper,
-more contest-like, better-aligned problems than direct seed prompting. The
-benchmark uses the same sampled seeds for both systems.
-
-| Metric | Direct prompting | atomicmath |
-| --- | ---: | ---: |
-| Mean depth score | 0.482 | 0.564 |
-| Mean contest score | 0.628 | 0.678 |
-| Mean seed alignment | 0.628 | 0.790 |
-| Mean routine score ↓ | 0.690 | 0.652 |
-| Mean MinHash overlap ↓ | 0.047 | 0.017 |
-| Mean non-stitched score | 0.981 | 0.990 |
-
-The hinge-aware internal judge also reports strong preservation and mutation
-quality across the MathNet sample:
-
-| atomicmath internal metric | Value |
-| --- | ---: |
-| Hinge preservation | 0.945 |
-| Mutation quality | 0.883 |
-| Sharpness | 0.827 |
-| Atomic novelty | 0.800 |
-| Non-stitched structure | 0.996 |
-
-Published benchmark datasets:
-
-- [`vibhuiitj/mathnet-direct-baseline_100`](https://huggingface.co/datasets/vibhuiitj/mathnet-direct-baseline_100)
-- [`vibhuiitj/mathnet-atomicmath_100`](https://huggingface.co/datasets/vibhuiitj/mathnet-atomicmath_100)
-
-Full benchmark details are in [`docs/04-mathnet-benchmark.md`](docs/04-mathnet-benchmark.md).
-
-## Storage
-
-The pipeline stores progress in SQLite. The most relevant mutation tables are:
-
-- `seeds`: ingested seed problems;
-- `seed_hinges`: extracted hinge notes;
-- `mutation_episodes`: every generated candidate and judge result;
-- `mutation_experiences`: distilled global success/failure memory.
-
-The default example config writes to:
-
-```text
-./atomicmath_math500.db
-./cache/
-```
+`artifacts_json` stores raw generation, refinement, judgement, candidate, and
+memory context for that iteration. The `memory` and `memory_json` fields are
+written into the dataset itself, so the next run can read prior success/failure
+lessons from parent rows without hidden external state.
 
 ## Install
 
@@ -214,106 +59,127 @@ The default example config writes to:
 pip install -e .
 ```
 
-Set API keys required by your configured models and upload target:
+Set the provider keys required by your configured models:
 
 ```bash
 export OPENAI_API_KEY=...
 export HF_TOKEN=...
 ```
 
-## Configuration
+## Configure
 
-The example config uses `HuggingFaceH4/MATH-500`:
-
-```bash
-examples/config.example.yaml
-```
-
-Important mutation settings:
+The only required input columns are a question field and an answer field. Their
+names are configurable:
 
 ```yaml
-mutation:
-  extraction_model: "openai/gpt-5-mini"
-  generation_model: "openai/gpt-5-mini"
-  judge_model: "openai/gpt-5-mini"
-  global_memory_enabled: true
-  global_success_memory_limit: 5
-  global_failure_memory_limit: 5
-  global_memory_max_active: 300
+input:
+  dataset: "ShadenA/MathNet"
+  config_name: "United_States"
+  split: "train"
+  question_field: "question"
+  answer_field: "answer"
+  iteration_field: "iteration"
+  memory_field: "memory"
+  max_seeds: 100
+  seed: 42
 ```
 
-## Common Commands
+The sampling seed makes selected examples stable across runs.
 
-Inspect or backfill global memory:
+Output can be local only or pushed to Hugging Face:
+
+```yaml
+output:
+  dataset: "vibhuiitj/atomicmath-lineage"
+  split: "train"
+  private: false
+  push_to_hub: false
+  append_if_same_dataset: true
+  local_path: "./out/lineage/atomicmath_lineage.jsonl"
+  summary_path: "./out/lineage/atomicmath_lineage_summary.json"
+```
+
+If `output.dataset` is the same as `input.dataset`, generated questions are
+appended to the original dataset before upload. If it differs, atomicmath creates
+or updates the output dataset with the new current-iteration rows.
+
+## Run
+
+Dry run seed sampling:
 
 ```bash
-python3 -m atomicmath.cli mutate memory \
+python3 -m atomicmath.cli run \
   --config examples/config.example.yaml \
-  --backfill \
-  --limit 10
+  --num-seeds 10 \
+  --dry-run
 ```
 
-Run a small end-to-end mutation probe:
+Generate lineages locally:
 
 ```bash
-python3 scripts/probe_mutation_generation.py \
+python3 -m atomicmath.cli run \
   --config examples/config.example.yaml \
-  --limit 10 \
-  --n 1
+  --num-seeds 10
 ```
 
-Print the exact generation prompt for a seed:
+Generate and upload to Hugging Face:
 
 ```bash
-python3 -m atomicmath.cli mutate build-prompt \
+python3 -m atomicmath.cli run \
   --config examples/config.example.yaml \
-  --seed-id <seed_id>
+  --num-seeds 100 \
+  --push-to-hub \
+  --dataset-id vibhuiitj/atomicmath-lineage
 ```
 
-Generate candidates for one seed:
+Launch the local web UI:
 
 ```bash
-python3 -m atomicmath.cli mutate generate \
+python3 -m atomicmath.cli web \
   --config examples/config.example.yaml \
-  --seed-id <seed_id> \
-  --n 1 \
-  --judge
+  --port 8765
 ```
 
-Publish accepted mutation outputs to Hugging Face:
+The UI lets you enter OpenAI/Hugging Face credentials for the run, edit grouped
+dataset/model/quality/output settings, and inspect each parent row as queued,
+running, done, rejected, or errored. It expands finished rows into generation,
+refinement, judgement, selected candidate, scores, and raw artifact context.
 
-```bash
-python3 -m atomicmath.cli mutate publish \
-  --config examples/config.example.yaml \
-  --dataset vibhuiitj/math500-output_atomicmath
-```
-
-## Retrosynthesis Path
-
-The repository also includes a composer/realizer pipeline:
+## Pipeline
 
 ```text
-ingest -> normalize topics -> index seeds -> bootstrap exemplars
-      -> compose scaffold -> realize candidate -> verify -> publish
+Hugging Face dataset
+        |
+        v
+deterministic seed sample
+        |
+        v
+infer source max iteration and target current iteration
+        |
+        v
+generator creates multiple transformed candidates
+        |
+        v
+refiner improves all candidates together
+        |
+        v
+judge scores correctness, novelty, depth, alignment, compactness
+        |
+        v
+selector picks the next accepted question
+        |
+        v
+iteration row + artifacts + memory
 ```
 
-Run it with:
+## Design Notes
 
-```bash
-atomicmath run --config examples/config.example.yaml
-atomicmath run --config examples/config.example.yaml --dry-run
-```
+The prompts use loose sectioned text rather than strict JSON. The program parses
+standard headings such as `Problem:`, `Answer:`, `Solution:`, and judge score
+fields. Raw responses are still saved, so failed parsing or weak candidates are
+inspectable after a run.
 
-See [`docs/00-pipeline.md`](docs/00-pipeline.md) for that path.
-
-## Operational Notes
-
-The mutation probe uses multiple LLM calls per seed:
-
-- hinge extraction;
-- plan + generate;
-- correctness verification when enabled;
-- quality judging.
-
-Use small `--limit` values for initial validation. The SQLite DB and cache make
-runs inspectable and resumable.
+Memory is dataset-native. Each generated or rejected row stores a compact
+`memory` field plus detailed `memory_json` and `artifacts_json`. On the next run,
+atomicmath reads memory from rows in the latest accepted iteration and uses it as
+context for producing the next iteration.

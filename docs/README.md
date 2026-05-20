@@ -1,13 +1,19 @@
-# atomicmath — docs
+# atomicmath docs
 
-**Pipeline reference: [`00-pipeline.md`](00-pipeline.md)** — describes the code as it runs today (ingest → index → exemplars → composer → realizer → verify → publish).
+`atomicmath` now has one primary path: iterative lineage synthesis.
 
-**Design note: [`01-hinge-memory-approach.md`](01-hinge-memory-approach.md)** — proposed hinge-story memory approach for future generation experiments.
+The runner samples parent rows from the latest accepted dataset iteration,
+creates the next iteration only, records the full artifact and memory trail in
+the generated rows, and optionally publishes those rows back to the Hub.
 
-**Planner: [`02-hinge-implementation-planner.md`](02-hinge-implementation-planner.md)** — concrete implementation plan for single-question mutation using the original question, solution, hinge notes, transformation examples, and success/failure stories.
+The implementation lives in:
 
-**Mutation memory: [`03-global-mutation-memory.md`](03-global-mutation-memory.md)** — current global distilled memory layer used by the mutation prompt.
+- `atomicmath/lineage.py`
+- `atomicmath/config.py`
+- `atomicmath/cli.py`
 
-**Benchmark: [`04-mathnet-benchmark.md`](04-mathnet-benchmark.md)** — MathNet-100 comparison between direct prompting and atomicmath mutation.
+Run it with:
 
-`research-notes/` is older exploration only; if anything disagrees with `00-pipeline.md`, trust the pipeline doc.
+```bash
+python3 -m atomicmath.cli run --config examples/config.example.yaml
+```

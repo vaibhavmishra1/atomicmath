@@ -1,144 +1,51 @@
-# atomicmath — retrosynthesis composer path (concept brief → scaffold → problem).
-# Required: input, output, models.
-
-# input:
-#   dataset: "ShadenA/MathNet"
-#   # Optional HF dataset config; ignored when null.
-#   config_name: "United_States"
-#   # Optional; defaults to "train".
-#   split: "train"
-#   # Required dataset columns:
-#   question_field: "problem_markdown"
-#   solution_field: "solutions_markdown"
-#   # Optional dataset columns; ignored if absent in the dataset.
-#   answer_field: "final_answer"
-#   topic_field: "topics_flat"
-#   default_topic: "train"
-#   language_field: "language"
-#   language_filter: "English"
-#   problem_type_field: "problem_type"
-#   # "answer only" matches MathNet's "final answer only" in ingest.
-#   problem_type_filter: ["answer only", "proof and answer"]
-#   max_seeds: 50
+# atomicmath lineage config
+#
+# The only required dataset columns are question and answer. Change the field
+# names below for any Hugging Face dataset with a different schema.
 
 input:
-  dataset: "HuggingFaceH4/MATH-500"
-  # Optional HF dataset config; ignored when null.
-  config_name: ""
-  # Optional; defaults to "train".
-  split: "test"
-  # Required dataset columns:
-  question_field: "problem"
-  solution_field: "solution"
-  # Optional dataset columns; ignored if absent in the dataset.
-  answer_field: "answer"
-  topic_field: "subject"
-  default_topic: "math"
-  language_field: ""
-  language_filter: "English"
-  problem_type_field: ""
-  # "answer only" matches MathNet's "final answer only" in ingest.
-  problem_type_filter: []
-  max_seeds: 50
-
-
-
+  dataset: "ShadenA/MathNet"
+  config_name: "United_States"
+  split: "train"
+  question_field: "problem_markdown"
+  answer_field: "final_answer"
+  iteration_field: "iteration"
+  memory_field: "memory"
+  max_seeds: 100
+  seed: 42
 
 output:
-  dataset: "vibhuiitj/math500-output_v2"
+  # If this is the same as input.dataset, generated questions are appended to
+  # the original dataset before upload. If it differs, only generated rows are
+  # uploaded to the new dataset.
+  dataset: "vibhuiitj/atomicmath-lineage"
+  split: "train"
   private: false
-  push_audit_sidecar: true
+  push_to_hub: false
+  append_if_same_dataset: true
+  local_path: "./out/lineage/atomicmath_lineage.jsonl"
+  summary_path: "./out/lineage/atomicmath_lineage_summary.json"
 
 models:
-  embedder: "openai/text-embedding-3-small"
-  extractor: "openai/gpt-5.5"
-  judge: "openai/gpt-5.4"
-  generators:
-    - "openai/gpt-5.5"
-  verifiers:
-    - "openai/gpt-5.5"
+  generator: "openai/gpt-5-mini"
+  refiner: "openai/gpt-5-mini"
+  judge: "openai/gpt-5-mini"
 
-taxonomy:
-  path: "default"
-
-filters:
-  language: "en"
-  max_question_tokens: 4000
-  max_answer_tokens: 1000
-  min_topic_size: 2
-
-generator:
-  rounds: 1
-  candidates_per_round: 4
-  fidelity_weight: 0.4
-  correctness_weight: 0.4
-  novelty_weight: 0.2
-  fidelity_unrealizable_threshold: 0.30
-
-gate:
-  novelty_minhash_max: 0.60
-  novelty_embed_max: 0.92
-  correctness_verifier_count: 1
-  correctness_consensus: 1
-  answer_equivalence_model: "openai/gpt-5-mini"
-  answer_equivalence_fallback: true
-  affinity_log_threshold: 0.7
-
-curriculum:
-  coverage_smoothing: 1.0
-  coverage_power: 1.0
-  epsilon_uniform_pair: 0.08
-
-composer:
-  model: null
-  temperature: 0.3
-
-realizer:
-  temperature: 0.7
-
-exemplar_bootstrap:
-  model: null
-  max_bootstrap: null
-
-quality:
-  enabled: true
-  model: "openai/gpt-5-mini"
-  min_depth_score: 0.45
-  min_contest_score: 0.50
-  max_routine_score: 0.72
-  require_judge_pass: false
-
-mutation:
-  enabled: true
-  extraction_model: "openai/gpt-5.5"
-  generation_model: "openai/gpt-5.5"
-  judge_model: "openai/gpt-5.4"
-  prompt_version: "single_question_plan_generate_v3"
-  max_hinges_per_seed: 3
-  min_solution_chars: 20
-  generator_temperature: 0.7
+lineage:
+  candidates_per_iteration: 3
+  generator_temperature: 0.8
+  refiner_temperature: 0.4
   judge_temperature: 0.0
-  global_memory_enabled: true
-  global_success_memory_limit: 5
-  global_failure_memory_limit: 5
-  global_memory_max_active: 300
-  global_memory_max_lesson_chars: 1800
-  global_memory_prioritize_topic: true
-  strict_correctness: true
-  min_hinge_preservation: 0.70
-  min_mutation_quality: 0.60
-  min_sharpness: 0.60
-  min_non_stitched: 0.75
-  min_solution_economy: 0.55
-  min_novelty: 0.55
-  max_seed_minhash_overlap: 0.75
+  max_memory_items: 8
+  min_novelty: 0.45
+  min_depth: 0.45
+  min_non_stitched: 0.70
+  min_solution_economy: 0.50
+  continue_on_rejected: false
 
 storage:
-  db_path: "./atomicmath_math500.db"
   cache_dir: "./cache"
 
 runtime:
-  target_count: 5
-  max_attempts: 200
-  log_level: "INFO"
   dry_run: false
+  log_level: "INFO"
